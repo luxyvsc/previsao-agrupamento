@@ -1,0 +1,19 @@
+# Python venv
+venv/
+
+# Streamlit secrets (nunca versione chaves)
+.streamlit/secrets.toml
+
+# Arquivos locais temporários
+*.pyc
+__pycache__/
+
+# CSVs locais não versionados
+novas_entradas.csv
+novas_entradas*.csv
+
+# Ferramentas locais
+.qodo/
+
+# VS Code
+.vscode/

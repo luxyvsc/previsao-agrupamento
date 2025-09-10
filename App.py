@@ -72,7 +72,7 @@ def processar_prever(df):
         return None
 
 
-def gerar_descricao_hf(df, token: str, model_id: str = "mistralai/Mistral-7B-Instruct-v0.2") -> str:
+def gerar_descricao_hf(df, token: str, model_id: str = "google/flan-t5-large") -> str:
     """Gera descrição dos grupos usando a Hugging Face Inference API."""
     prompt = (
         "Você é um especialista em análise de dados. Recebeu um DataFrame com os seguintes grupos identificados: "
@@ -86,17 +86,24 @@ def gerar_descricao_hf(df, token: str, model_id: str = "mistralai/Mistral-7B-Ins
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     api_url = f"https://api-inference.huggingface.co/models/{model_id}"
-    payload = {"inputs": prompt}
+    payload = {"inputs": prompt, "parameters": {"max_new_tokens": 400, "return_full_text": False, "temperature": 0.3}}
     try:
         resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
         if resp.status_code == 200:
             result = resp.json()
-            if isinstance(result, list) and result and 'generated_text' in result[0]:
-                return result[0]['generated_text']
-            if isinstance(result, dict) and 'generated_text' in result:
-                return result['generated_text']
-            if isinstance(result, list) and result and 'error' in result[0]:
-                return f"Erro: {result[0]['error']}"
+            # Common serverless formats
+            if isinstance(result, list):
+                # text-generation pipeline
+                if result and isinstance(result[0], dict):
+                    if 'generated_text' in result[0]:
+                        return result[0]['generated_text']
+                    if 'error' in result[0]:
+                        return f"Erro: {result[0]['error']}"
+            if isinstance(result, dict):
+                if 'generated_text' in result:
+                    return result['generated_text']
+                if 'error' in result:
+                    return f"Erro: {result['error']}"
             return str(result)
         return f"Erro Hugging Face: {resp.text}"
     except Exception as e:
@@ -106,7 +113,7 @@ def gerar_descricao_hf(df, token: str, model_id: str = "mistralai/Mistral-7B-Ins
 if up_file is not None:
     try:
         df = pd.read_csv(up_file)
-        st.success('✅ Arquivo carregado com sucesso!')
+        st.success('Arquivo carregado com sucesso!')
         cluster = processar_prever(df)
         if cluster is not None:
             df.insert(0, 'grupos', cluster)
@@ -115,9 +122,12 @@ if up_file is not None:
             st.markdown('### Descrição dos Grupos via Hugging Face')
             hf_token = (st.secrets.get('HF_TOKEN') if hasattr(st, 'secrets') and 'HF_TOKEN' in st.secrets else os.environ.get('HF_TOKEN'))
             if hf_token:
-                with st.spinner('Consultando Hugging Face...'):
-                    descricao = gerar_descricao_hf(df, hf_token)
-                st.markdown(f"<div style='background-color:#eaf6ff; padding:10px; border-radius:8px;'>{descricao}</div>", unsafe_allow_html=True)
+                # Permitir override do modelo por secret/variável de ambiente
+                model_id = (st.secrets.get('MODEL_ID') if hasattr(st, 'secrets') and 'MODEL_ID' in st.secrets else os.environ.get('MODEL_ID', 'google/flan-t5-large'))
+                with st.spinner(f'Consultando Hugging Face ({model_id})...'):
+                    descricao = gerar_descricao_hf(df, hf_token, model_id)
+                # Renderização com bom contraste em qualquer tema (sem fundo customizado)
+                st.markdown(descricao)
             else:
                 st.warning('Defina o token da Hugging Face (HF_TOKEN) nas variáveis de ambiente ou em st.secrets para gerar a descrição automática.')
 
