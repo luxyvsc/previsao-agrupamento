@@ -1,39 +1,63 @@
 # Grupos de interesse para marketing
 
-Aplicação Streamlit que carrega modelos (encoder, scaler e k-means) para prever clusters de interesse a partir de um CSV e gera uma descrição automática dos grupos via Hugging Face Inference API.
+Aplicação Streamlit que prevê clusters (K-means) a partir de um CSV e gera uma descrição automática dos grupos via Hugging Face Inference API.
 
 ## Funcionalidades
-- Upload de CSV e previsão de cluster com modelos pré-treinados (`encoder.pkl`, `scaler.pkl`, `kmeans.pkl`).
+- Upload de CSV e previsão com modelos pré-treinados (`encoder.pkl`, `scaler.pkl`, `kmeans.pkl`).
 - Validação de colunas essenciais (ex.: `sexo`).
-- Visualização de amostra dos resultados e distribuição dos grupos.
-- Geração opcional de descrição dos grupos via Hugging Face (token em secrets/env).
+- Visualização (amostra + distribuição por grupos).
+- Descrição automática dos grupos (Hugging Face) com seletor de modelo na UI e fallback entre modelos serverless gratuitos.
 - Download do CSV anotado com a coluna `grupos`.
 
-## Estrutura
+## Requisitos
+- Python 3.11 (o projeto inclui `runtime.txt` para o Streamlit Cloud).
+- Artefatos na raiz: `encoder.pkl`, `scaler.pkl`, `kmeans.pkl`.
+
+## Executar localmente (Windows PowerShell)
+```powershell
+# 1) Ambiente virtual
+py -m venv venv
+./venv/Scripts/Activate
+
+# 2) Dependências
+py -m pip install --upgrade pip
+py -m pip install -r .\requirements.txt
+
+# 3) (Opcional) Secrets locais
+#   .streamlit/secrets.toml:
+#   [default]
+#   HF_TOKEN = "hf_SEU_TOKEN"
+#   MODEL_ID = "google/flan-t5-large"
+
+# 4) Rodar o app
+py -m streamlit run .\App.py
+```
+
+Dicas locais:
+- Se `pandas` falhar na instalação, prefira Python 3.11 e pip atualizado. Alternativa: `py -m pip install --only-binary=:all: pandas`.
+
+## Hugging Face – modelos e tokens
+- Gere um token com permissão `read`: https://huggingface.co/settings/tokens
+- Modelos serverless gratuitos suportados (sem “Inference Providers”):
+   - `google/flan-t5-large` (padrão)
+   - `google/flan-t5-base`
+   - `MBZUAI/LaMini-Flan-T5-248M`
+- O app possui seletor de modelo na UI e fallback automático se houver erro de providers/permissões.
+
+## Solução de problemas
+- Erro: `This authentication method does not have sufficient permissions to call Inference Providers ...`
+   - Use os modelos acima. O app já faz fallback; você também pode trocar no seletor da UI.
+- Resposta lenta na primeira chamada: “model loading”; aguarde e tente de novo.
+- Descrição vazia: verifique se `HF_TOKEN` está definido nos Secrets/env no deploy.
+
+## Estrutura do projeto
 - `App.py`: aplicação Streamlit.
-- `encoder.pkl`, `scaler.pkl`, `kmeans.pkl`: artefatos do modelo (devem estar na raiz).
-- `requirements.txt`: dependências do projeto.
-- `runtime.txt`: versão do Python para deploy (Streamlit Cloud).
+- `encoder.pkl`, `scaler.pkl`, `kmeans.pkl`: pipeline de predição.
+- `requirements.txt`: dependências.
+- `runtime.txt`: versão do Python.
+- `.gitignore`: ignora `venv/`, `.streamlit/secrets.toml`, CSVs locais, etc.
+- `README.md`: este arquivo.
 
-## Executar localmente
-1. Crie e ative um ambiente virtual.
-2. Instale dependências:
-   - Caso encontre erro ao instalar `pandas` no Windows local, use Python 3.11.
-3. Rode o app:
-   ```bash
-   streamlit run App.py
-   ```
-
-## Integração Hugging Face (opcional)
-- Crie um token em https://huggingface.co/settings/tokens (tipo: `read`).
-- Localmente, crie `.streamlit/secrets.toml` com:
-  ```toml
-  [default]
-  HF_TOKEN = "hf_SEU_TOKEN"
-  MODEL_ID = "google/flan-t5-large"
-  ```
-  ```
-
-## Observações
-- Não versione segredos ou ambientes virtuais. O `.gitignore` já inclui `venv/`, `.streamlit/secrets.toml`, arquivos temporários e CSVs locais.
-- Se trocar o esquema de dados, atualize a validação e o pipeline de pré-processamento.
+## Segurança
+- Não versione segredos ou ambientes virtuais.
+- Caso um token seja exposto, revogue e gere outro na Hugging Face.
