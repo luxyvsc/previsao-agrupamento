@@ -1,0 +1,136 @@
+import streamlit as st
+import pandas as pd
+import joblib
+import os
+import numpy as np
+import requests
+
+
+# Cache para carregar modelos apenas uma vez
+@st.cache_resource
+def load_encoder():
+    try:
+        return joblib.load('encoder.pkl')
+    except Exception as e:
+        st.error(f'Erro ao carregar encoder: {e}')
+        return None
+
+@st.cache_resource
+def load_scaler():
+    try:
+        return joblib.load('scaler.pkl')
+    except Exception as e:
+        st.error(f'Erro ao carregar scaler: {e}')
+        return None
+
+@st.cache_resource
+def load_kmeans():
+    try:
+        return joblib.load('kmeans.pkl')
+    except Exception as e:
+        st.error(f'Erro ao carregar kmeans: {e}')
+        return None
+
+encoder = load_encoder()
+scaler = load_scaler()
+kmeans = load_kmeans()
+
+
+st.title('Grupos de interesse para marketing')
+st.write("""
+Neste projeto, aplicamos o algoritmo de clusterização K-means para identificar e prever agrupamentos de interesses de usuários, com o objetivo de direcionar campanhas de marketing de forma mais eficaz.
+Através dessa análise, conseguimos segmentar o público em bolhas de interesse, permitindo a criação de campanhas personalizadas e mais assertivas, com base nos padrões de comportamento e preferências de cada grupo.
+""")
+
+
+up_file = st.file_uploader('Escolha um arquivo CSV para realizar a previsão', type='csv')
+
+
+def validar_dados(df):
+    """Valida se o DataFrame possui as colunas esperadas."""
+    colunas_esperadas = ['sexo']
+    for col in colunas_esperadas:
+        if col not in df.columns:
+            return False, f'Coluna obrigatória ausente: {col}'
+    return True, ''
+
+def processar_prever(df):
+    """Processa o DataFrame e retorna os clusters."""
+    try:
+        valido, msg = validar_dados(df)
+        if not valido:
+            st.error(msg)
+            return None
+        encoded_sexo = encoder.transform(df[['sexo']])
+        encoded_df = pd.DataFrame(encoded_sexo, columns=encoder.get_feature_names_out(['sexo']))
+        dados = pd.concat([df.drop('sexo', axis=1), encoded_df], axis=1)
+        dados_escalados = scaler.transform(dados)
+        cluster = kmeans.predict(dados_escalados)
+        return cluster
+    except Exception as e:
+        st.error(f'Erro ao processar dados: {e}')
+        return None
+
+
+def gerar_descricao_hf(df, token: str, model_id: str = "mistralai/Mistral-7B-Instruct-v0.2") -> str:
+    """Gera descrição dos grupos usando a Hugging Face Inference API."""
+    prompt = (
+        "Você é um especialista em análise de dados. Recebeu um DataFrame com os seguintes grupos identificados: "
+        f"{df['grupos'].unique().tolist()}\n"
+        "Abaixo está uma amostra dos dados de cada grupo. Por favor, gere uma breve descrição para cada grupo, destacando possíveis padrões e interesses.\n"
+    )
+    for g in df['grupos'].unique():
+        amostra = df[df['grupos'] == g].head(5).to_dict()
+        prompt += f"\nGrupo {g}: {amostra}\n"
+    prompt += "\nResponda em português."
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    api_url = f"https://api-inference.huggingface.co/models/{model_id}"
+    payload = {"inputs": prompt}
+    try:
+        resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+        if resp.status_code == 200:
+            result = resp.json()
+            if isinstance(result, list) and result and 'generated_text' in result[0]:
+                return result[0]['generated_text']
+            if isinstance(result, dict) and 'generated_text' in result:
+                return result['generated_text']
+            if isinstance(result, list) and result and 'error' in result[0]:
+                return f"Erro: {result[0]['error']}"
+            return str(result)
+        return f"Erro Hugging Face: {resp.text}"
+    except Exception as e:
+        return f"Erro ao conectar com Hugging Face: {e}"
+
+
+if up_file is not None:
+    try:
+        df = pd.read_csv(up_file)
+        st.success('✅ Arquivo carregado com sucesso!')
+        cluster = processar_prever(df)
+        if cluster is not None:
+            df.insert(0, 'grupos', cluster)
+
+            # Geração automática de descrição via Hugging Face (se HF_TOKEN estiver configurado)
+            st.markdown('### Descrição dos Grupos via Hugging Face')
+            hf_token = (st.secrets.get('HF_TOKEN') if hasattr(st, 'secrets') and 'HF_TOKEN' in st.secrets else os.environ.get('HF_TOKEN'))
+            if hf_token:
+                with st.spinner('Consultando Hugging Face...'):
+                    descricao = gerar_descricao_hf(df, hf_token)
+                st.markdown(f"<div style='background-color:#eaf6ff; padding:10px; border-radius:8px;'>{descricao}</div>", unsafe_allow_html=True)
+            else:
+                st.warning('Defina o token da Hugging Face (HF_TOKEN) nas variáveis de ambiente ou em st.secrets para gerar a descrição automática.')
+
+            st.write('Visualização dos resultados (10 primeiros registros):')
+            st.dataframe(df.head(10), use_container_width=True)
+
+            # Visualização gráfica da distribuição dos grupos
+            st.markdown('**Distribuição dos grupos:**')
+            st.bar_chart(df['grupos'].value_counts().sort_index())
+
+            # Permite ao usuário escolher o nome do arquivo de download
+            nome_arquivo = st.text_input('Nome do arquivo para download:', value='Grupos_interesse.csv')
+            csv = df.to_csv(index=False)
+            st.download_button(label='Baixar resultados completos', data=csv, file_name=nome_arquivo, mime='text/csv')
+    except Exception as e:
+        st.error(f'Erro ao ler o arquivo: {e}')
